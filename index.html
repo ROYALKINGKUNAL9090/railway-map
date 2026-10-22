@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Indian Railways Live Train Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    #bar { padding: 10px; background: #0b3d91; color: #fff; display: flex; gap: 8px; }
+    #bar input { flex: 1; padding: 8px; border-radius: 6px; border: none; }
+    #bar button { padding: 8px 14px; border: none; border-radius: 6px; background: #ffb400; font-weight: bold; }
+    #map { height: calc(100vh - 170px); }
+    #info { padding: 10px 14px; background: #f4f4f4; font-size: 15px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <input id="trainNo" placeholder="Train number (e.g. 12951)" />
+    <button onclick="loadTrain()">Track</button>
+  </div>
+  <div id="map"></div>
+  <div id="info">Enter a train number and press Track.</div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map("map").setView([24.5, 79], 5);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+
+    let marker, routeLine, stationMarkers = [];
+
+    // DEMO DATA. Replace getTrainStatus() with a real API call later.
+    async function getTrainStatus(trainNo) {
+      return {
+        trainNo,
+        name: "Demo Express",
+        lat: 27.1767,
+        lng: 78.0081,
+        currentStation: "Agra Cantt",
+        nextStation: "Gwalior",
+        distanceToNextKm: 118,
+        delayMin: 12,
+        coaches: ["ENG", "SLR", "S1", "S2", "S3", "B1", "B2", "A1", "GEN"],
+        stations: [
+          { name: "New Delhi", lat: 28.6139, lng: 77.209 },
+          { name: "Agra Cantt", lat: 27.1767, lng: 78.0081 },
+          { name: "Gwalior", lat: 26.2183, lng: 78.1828 },
+          { name: "Jhansi", lat: 25.4484, lng: 78.5685 },
+          { name: "Bhopal", lat: 23.2599, lng: 77.4126 },
+        ],
+      };
+    }
+
+    async function loadTrain() {
+      const no = document.getElementById("trainNo").value.trim();
+      if (!no) return alert("Please enter a train number");
+
+      const t = await getTrainStatus(no);
+      const points = t.stations.map((s) => [s.lat, s.lng]);
+
+      if (routeLine) map.removeLayer(routeLine);
+      if (marker) map.removeLayer(marker);
+      stationMarkers.forEach((m) => map.removeLayer(m));
+      stationMarkers = [];
+
+      routeLine = L.polyline(points, { color: "#0b3d91", weight: 4 }).addTo(map);
+      t.stations.forEach((s) => {
+        stationMarkers.push(
+          L.circleMarker([s.lat, s.lng], { radius: 5, color: "#0b3d91", fillColor: "#fff", fillOpacity: 1 })
+            .addTo(map).bindTooltip(s.name)
+        );
+      });
+      marker = L.marker([t.lat, t.lng]).addTo(map)
+        .bindPopup(`${t.name} (${t.trainNo})`).openPopup();
+      map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+
+      document.getElementById("info").innerHTML = `
+        <b>${t.name} (${t.trainNo})</b><br>
+        Current station: ${t.currentStation}<br>
+        Next station: ${t.nextStation} (${t.distanceToNextKm} km away)<br>
+        Delay: ${t.delayMin} min<br>
+        Coach order: ${t.coaches.join(" | ")}
+      `;
+    }
+  </script>
+</body>
+</html>
