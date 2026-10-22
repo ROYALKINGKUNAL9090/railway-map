@@ -7,16 +7,17 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     body { margin: 0; font-family: Arial, sans-serif; }
-    #bar { padding: 10px; background: #0b3d91; color: #fff; display: flex; gap: 8px; }
+    #bar { padding: 10px; background: #0b3d91; display: flex; gap: 8px; }
     #bar input { flex: 1; padding: 8px; border-radius: 6px; border: none; }
     #bar button { padding: 8px 14px; border: none; border-radius: 6px; background: #ffb400; font-weight: bold; }
-    #map { height: calc(100vh - 170px); }
-    #info { padding: 10px 14px; background: #f4f4f4; font-size: 15px; line-height: 1.5; }
+    #map { height: calc(100vh - 190px); }
+    #info { padding: 10px 14px; background: #f4f4f4; font-size: 14px; line-height: 1.5; max-height: 120px; overflow: auto; }
+    pre { white-space: pre-wrap; word-break: break-all; margin: 0; }
   </style>
 </head>
 <body>
   <div id="bar">
-    <input id="trainNo" placeholder="Train number (e.g. 12951)" />
+    <input id="trainNo" placeholder="Train number (e.g. 12952)" />
     <button onclick="loadTrain()">Track</button>
   </div>
   <div id="map"></div>
@@ -24,65 +25,75 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const map = L.map("map").setView([24.5, 79], 5);
+    // ====== SETTINGS (change only these) ======
+    const API_KEY = "rg_94044d0930d54864bf82fb3467fc2246";
+    const BASE_URL = "https://api.railradar.in/v1";
+    const LIVE_PATH = (no) => `/trains/${no}/live`; // NOT verified, fix from docs if error
+    // ==========================================
+
+    const map = L.map("map").setView([22.5, 79], 5);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
 
-    let marker, routeLine, stationMarkers = [];
+    let marker, timer;
 
-    // DEMO DATA. Replace getTrainStatus() with a real API call later.
-    async function getTrainStatus(trainNo) {
-      return {
-        trainNo,
-        name: "Demo Express",
-        lat: 27.1767,
-        lng: 78.0081,
-        currentStation: "Agra Cantt",
-        nextStation: "Gwalior",
-        distanceToNextKm: 118,
-        delayMin: 12,
-        coaches: ["ENG", "SLR", "S1", "S2", "S3", "B1", "B2", "A1", "GEN"],
-        stations: [
-          { name: "New Delhi", lat: 28.6139, lng: 77.209 },
-          { name: "Agra Cantt", lat: 27.1767, lng: 78.0081 },
-          { name: "Gwalior", lat: 26.2183, lng: 78.1828 },
-          { name: "Jhansi", lat: 25.4484, lng: 78.5685 },
-          { name: "Bhopal", lat: 23.2599, lng: 77.4126 },
-        ],
-      };
+    // Search the JSON for a latitude/longitude pair, whatever the field names are
+    function findCoords(obj) {
+      if (!obj || typeof obj !== "object") return null;
+      const lat = obj.lat ?? obj.latitude;
+      const lng = obj.lng ?? obj.lon ?? obj.longitude;
+      if (typeof lat === "number" && typeof lng === "number") return [lat, lng];
+      for (const k in obj) {
+        const r = findCoords(obj[k]);
+        if (r) return r;
+      }
+      return null;
     }
 
-    async function loadTrain() {
+    async function fetchLive(no) {
+      const res = await fetch(BASE_URL + LIVE_PATH(no), {
+        headers: { Authorization: "Bearer " + API_KEY },
+      });
+      const text = await res.text();
+      let json;
+      try { json = JSON.parse(text); } catch { json = null; }
+      if (!res.ok) throw new Error("HTTP " + res.status + " - " + text.slice(0, 300));
+      return json;
+    }
+
+    async function update(no) {
+      const info = document.getElementById("info");
+      try {
+        const json = await fetchLive(no);
+        const d = json.data ?? json;
+        const pos = findCoords(d);
+
+        if (pos) {
+          if (marker) map.removeLayer(marker);
+          marker = L.marker(pos).addTo(map).bindPopup(d.trainName || no).openPopup();
+          map.setView(pos, 9);
+        }
+
+        info.innerHTML =
+          `<b>${d.trainName || ""} (${d.trainNumber || no})</b><br>` +
+          `Status: ${d.status ?? "-"}<br>` +
+          `Delay: ${d.delayMinutes ?? "-"} min<br>` +
+          `Current station: ${d.currentStation ?? d.lastStation ?? "-"}<br>` +
+          `Next station: ${d.nextStation ?? "-"}<br>` +
+          (pos ? "" : "<b>No map position found. Raw reply:</b><pre>" +
+            JSON.stringify(json, null, 1).slice(0, 800) + "</pre>");
+      } catch (e) {
+        info.innerHTML = "<b>Error:</b><pre>" + e.message + "</pre>";
+      }
+    }
+
+    function loadTrain() {
       const no = document.getElementById("trainNo").value.trim();
       if (!no) return alert("Please enter a train number");
-
-      const t = await getTrainStatus(no);
-      const points = t.stations.map((s) => [s.lat, s.lng]);
-
-      if (routeLine) map.removeLayer(routeLine);
-      if (marker) map.removeLayer(marker);
-      stationMarkers.forEach((m) => map.removeLayer(m));
-      stationMarkers = [];
-
-      routeLine = L.polyline(points, { color: "#0b3d91", weight: 4 }).addTo(map);
-      t.stations.forEach((s) => {
-        stationMarkers.push(
-          L.circleMarker([s.lat, s.lng], { radius: 5, color: "#0b3d91", fillColor: "#fff", fillOpacity: 1 })
-            .addTo(map).bindTooltip(s.name)
-        );
-      });
-      marker = L.marker([t.lat, t.lng]).addTo(map)
-        .bindPopup(`${t.name} (${t.trainNo})`).openPopup();
-      map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
-
-      document.getElementById("info").innerHTML = `
-        <b>${t.name} (${t.trainNo})</b><br>
-        Current station: ${t.currentStation}<br>
-        Next station: ${t.nextStation} (${t.distanceToNextKm} km away)<br>
-        Delay: ${t.delayMin} min<br>
-        Coach order: ${t.coaches.join(" | ")}
-      `;
+      clearInterval(timer);
+      update(no);
+      timer = setInterval(() => update(no), 60000); // refresh every 60 sec
     }
   </script>
 </body>
